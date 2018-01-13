@@ -3,6 +3,10 @@
 #include <TimerOne.h>
 #include <EEPROM.h>
 
+// byte *para_focus = &g_bpm;             //parameter focus
+//para_focus = &g_vel;                    //change parameter pointer  
+//*para_focus < r_lowest                  //get pointer value                   
+
 const int CLK = 10;                       //Set the CLK pin connection to the display
 const int DIO = 11;                       //Set the DIO pin connection to the display
 TM1637Display display(CLK, DIO);          //set up the 4-Digit Display.
@@ -35,6 +39,7 @@ byte step_cursor;                         //step edit cursor
 int pot_data;                             //analogue pot data
 byte b_data;                              //BPM level 
 int c_data;                               //CC level
+int ct_data;                              //temporary CC level
 int s_data;                               //sync data: 0=internal 1=external
 int shift_data;                           //beat shift 
 int o_data;                               //offset level
@@ -42,11 +47,11 @@ int d_data;                               //display mode
 byte m_data;                              //MIDI potentiometer
 byte EEPROM_ADDRESS;                      //eeprom save location
 int msend;                                //MIDI value send
-int brightness;                          //led brightness
+int brightness;                           //led brightness
 
 int bpm;                                  //internal BPM 
 int mode;                                 //select mode setting
-int m_chan;                               // MIDI channel
+int m_chan;                               //MIDI channel
 
 byte b_offset;                            //internal bpm offset REDUNDANT
 byte para;                                //parameter value
@@ -57,8 +62,6 @@ byte e_butt = 0;                          //edit button state
 
 #define CLOCKS_PER_BEAT 24
 #define PRINT_INTERVAL 10000
-//#define MINIMUM_BPM 40        // Used for debouncing      REDUNDANT
-//#define MAXIMUM_BPM 300 // Used for debouncing            REDUNDANT
 #define MINIMUM_TAPS 3  //                                  REDUNDANT
 #define EXIT_MARGIN 150 // If no tap after 150% of last tap interval -> measure and set  REDUNDANT
 
@@ -68,13 +71,11 @@ long intervalMicroSeconds;
 volatile int blinkCount = 0;     //                           REDUNDANT
 #define BLINK_TIME 4 // How long to keep LED lit in CLOCK counts (so range is [0,24])    REDUNDANT
 
-//    A
-//   ---
-// F | | B
-//   -G-
-// E | | C
-//   ---
-//    D
+//  ___
+// F|A|B
+//  -G-
+// E|D|C
+//  ---
 
 //const uint8_t SEG_DONE[] = {
 //  SEG_A | SEG_B | SEG_C | SEG_E | SEG_F | SEG_G,    // A
@@ -85,8 +86,8 @@ volatile int blinkCount = 0;     //                           REDUNDANT
 //  SEG_A | SEG_D | SEG_E | SEG_F | SEG_G,            // E
 //  SEG_A | SEG_E | SEG_F | SEG_G,                    // F
 //  SEG_A | SEG_B | SEG_C | SEG_D | SEG_F | SEG_G,    // g
-//  SEG_C | SEG_E | SEG_G ,                            // n
-//  SEG_C | SEG_E | SEG_D ,                            // u
+//  SEG_C | SEG_E | SEG_G ,                           // n
+//  SEG_C | SEG_E | SEG_D ,                           // u
 //  SEG_B | SEG_C | SEG_D | SEG_F | SEG_G,            // y
 //  SEG_D | SEG_E | SEG_F | SEG_G,                    // t
 //  SEG_C | SEG_D | SEG_E | SEG_G,                    // o
@@ -99,7 +100,7 @@ const uint8_t S_p[] = {
 
 const uint8_t S_omin[] = {
     SEG_C | SEG_D | SEG_E | SEG_G,            //o
-    SEG_G,0x0,0x0             // -
+    SEG_G,0x0,0x0                             // -
 };
 
 const uint8_t S_b[] = {
@@ -125,7 +126,11 @@ const uint8_t S_shft[] = {
 };
 
 const uint8_t S_c[] = {
-    SEG_A | SEG_D| SEG_E | SEG_F ,0x0,0x0,0x0            // C
+    SEG_A | SEG_D| SEG_E | SEG_F ,0x0,0x0,0x0         // C
+};
+
+const uint8_t S_c2[] = {
+    SEG_D | SEG_E | SEG_G ,0x0,0x0,0x0                // c
 };
 
 const uint8_t S_plus[] = {
@@ -141,6 +146,14 @@ const uint8_t S_minus[] = {
     SEG_G,
     0x0
 };
+
+const uint8_t S_no[] = {
+    SEG_D | SEG_E | SEG_G,   
+    SEG_C | SEG_E | SEG_G | SEG_F, 
+    SEG_G,                                            // ch--
+    SEG_G
+};
+
 
 const uint8_t S_ch[] = {
     SEG_D | SEG_E | SEG_G,   
@@ -172,17 +185,16 @@ const uint8_t S_soff[] = {
 
 const uint8_t S_sin[] = {
     SEG_A | SEG_D | SEG_C | SEG_F | SEG_G,            // S
-     0x0 , 
     SEG_E ,                                           // i
-    SEG_C | SEG_E | SEG_G                             // n
-                    
+    SEG_C | SEG_E | SEG_G,                            // n
+    SEG_D | SEG_E | SEG_F | SEG_G                     // t
 };
 
-const uint8_t S_out[] = {
+const uint8_t S_out[] = {  //oth as in other
     SEG_A | SEG_D | SEG_C | SEG_F | SEG_G,            // S
     SEG_C | SEG_D | SEG_E | SEG_G,                    // o
-    SEG_C | SEG_E | SEG_D ,                           // u
-    SEG_D | SEG_E | SEG_F | SEG_G                     // t
+    SEG_D | SEG_E | SEG_F | SEG_G,                    // t
+    SEG_C | SEG_E | SEG_G | SEG_F                     // h 
 };
 
 const uint8_t S_stop[] = {
@@ -262,15 +274,12 @@ void setup() {
 
   EEPROM_ADDRESS = 1;
   
-  pinMode(A6, OUTPUT);
-  digitalWrite(A6, LOW);
   pinMode(A7, INPUT_PULLUP);
   
   pinMode(e_pin, INPUT_PULLUP);
   
-  Serial.begin(31250);          // for midi
-  //Serial.begin(9600);          // for debug
-  display.setBrightness(1);     //set the diplay to maximum brightness
+  Serial.begin(31250);            //set for midi
+  //Serial.begin(9600);           //set for debug
 
   MIDI.begin(4);                      // Launch MIDI and listen to channel 4
   pinMode(ledPin, OUTPUT);
@@ -312,13 +321,13 @@ digitalWrite(gatePin, HIGH);                  //first CV out pulse 1
   attachInterrupt(1,PinB,RISING); // set an interrupt on PinB, looking for a rising edge signal and executing the "PinB" Interrupt Service Routine (below)
 
 analogWrite(ledPin, (3+brightness*36));                              //multiplexer light on
+display.setBrightness(brightness);                                   //set the diplay to brightness
 
   Timer1.initialize(intervalMicroSeconds);            //set interupt interval 
   Timer1.setPeriod(calculateIntervalMicroSecs(bpm));  
   Timer1.attachInterrupt(sendClockPulse);             //first pulse
   updateMode();                                       //starting mode
 }
-
 
 void loop() {
 
@@ -344,9 +353,10 @@ if (currentMillis - previousMillis >= 30) {
     
       if(digitalRead(e_pin) == HIGH) {  step_edit();}                                     //edit step mode
                                 
-      if(digitalRead(A3) == HIGH) {play_button();}  else {p_butt=0;}                      //switch play mode
-      if(digitalRead(A4) == HIGH) {stop_button();}  else {p_butt=0;}                      //stop and return to zero
-      if(digitalRead(A5) == HIGH) {hold_button();}  else {p_butt=0;}                      //hold button
+      if(analogRead(A3) >= 1000) {play_button();}  else {p_butt=0;}                      //play button
+      if(analogRead(A4) >= 1000) {stop_button();}  else {p_butt=0;}                      //stop and return to 1st step
+      if(analogRead(A5) >= 1000) {hold_button();}  else {p_butt=0;}                      //hold button
+      if(analogRead(A6) >= 1000) {select_button();}  else {p_butt=0;}                      //select button
       
     update_para();                                                      //show step parameter
 }
@@ -362,7 +372,7 @@ if(d_state == 1 and bpm !=  encoderPos) {             //update BPM
       updateBpm();
 } 
 
-if(d_state == 2 and c_data !=  encoderPos) {          //update CC
+if(d_state == 2 and ct_data !=  encoderPos) {          //update CC
       updateCC();
 } 
 
@@ -595,14 +605,21 @@ void updateBpm() {
 
 void updateCC() {
    
-    c_data = encoderPos;                                      //update CC value
+    ct_data = encoderPos;                                     //update CC value
 
-    if (c_data > 128) {c_data = 128; encoderPos = 128;}       //CC ceiling
-    if (c_data < 0) {c_data = 0; encoderPos = 0;}             //CC floor
-    
+    if (ct_data > 128) {ct_data = 128; encoderPos = 128;}     //CC ceiling
+    if (ct_data < 0) {ct_data = 0; encoderPos = 0;}           //CC floor
+
+    if (c_data == ct_data){
       display.setSegments(S_c);                               //show C for cc in 1st digit
       display.showNumberDec(c_data,false,3,1);                //show CC value 
-
+    }
+    else
+    {
+      display.setSegments(S_c2);                              //show c for cc in 1st digit
+      display.showNumberDec(ct_data,false,3,1);               //show CC selection value 
+    }
+    
   // Save the CC
   EEPROM.write(2, c_data);                                    // save CC to eeprom
   bpmMillis = millis();                                       // last timer change
@@ -610,10 +627,9 @@ void updateCC() {
 
 void updateShift() {
 
-    if (shift_data > encoderPos) {midi_tap--; display.setSegments(S_minus); }             //shift back
-    if (shift_data < encoderPos) {midi_tap++; display.setSegments(S_plus); }              //shift forward
-   
-   shift_data = encoderPos;                                                               //update shift value
+    shift_data = encoderPos; 
+    if (shift_data > 1) {shift_data = 1; encoderPos = 1; display.setSegments(S_plus); }             //sync ceiling
+    if (shift_data < 0) {shift_data = 0; encoderPos = 0; display.setSegments(S_minus);}             //sync floor
  
   bpmMillis = millis();                                                                   // last timer change
 }
@@ -665,11 +681,11 @@ void updateBright() {
    
     brightness = encoderPos;                                      //update brightness value
 
-    if (brightness > 7) {brightness = 7; encoderPos = 7;}   //brightness ceiling
-    if (brightness < 0) {brightness = 0; encoderPos = 0;}      //brightness floor
+    if (brightness > 7) {brightness = 7; encoderPos = 7;}         //brightness ceiling
+    if (brightness < 0) {brightness = 0; encoderPos = 0;}         //brightness floor
 
-    analogWrite(ledPin, (3+brightness*36));                              //multiplexer light on
-    display.setBrightness(brightness);                       //set the diplay to maximum brightness
+    analogWrite(ledPin, (3+brightness*36));                       //multiplexer light on
+    display.setBrightness(brightness);                            //set the diplay to maximum brightness
 
       display.setSegments(S_L);                                   //show o for brightness in 1st digit
       display.showNumberDec(brightness,false,3,1);                //show brightness value 
@@ -693,6 +709,7 @@ void updateMode() {
     case 1:
       display.setSegments(S_ccon);
       encoderPos = c_data;                              //set encoder to CC
+      ct_data = c_data;                                  //set select cc to same
       d_state = 2;
       break;
     case 2:
@@ -700,11 +717,11 @@ void updateMode() {
       encoderPos = s_data;
       d_state = 3; 
       break;
-//    case 3:
-//      display.setSegments(S_shft);                      //shift pulses
-//      encoderPos = shift_data;
-//      d_state = 4;
-//      break;
+    case 3:
+      display.setSegments(S_shft);                      //shift pulses
+      encoderPos = shift_data;
+      d_state = 4;
+      break;
     case 4:
       display.setSegments(S_offs);                      //offset parameter display
       encoderPos = o_data;
@@ -724,9 +741,14 @@ void updateMode() {
 void updateChan() {
 
     m_chan = m_data;                                        //update midi channel value
-      display.setSegments(S_ch);                            //show ch 
-      display.showNumberDec(m_chan,false,2,2);              //show channel value 
-   
+      display.setSegments(S_ch);                            //show ch
+      if (m_chan != 0){
+        display.showNumberDec(m_chan,false,2,2);              //show channel value 
+      }
+      else
+      {
+        display.setSegments(S_no);                         //show no channel
+      }
   bpmMillis = millis();                                     //last timer change
 }
 
@@ -815,6 +837,23 @@ p_butt=1;                                                       //set play butto
   }
 }
 
+void select_button(){
+
+if (d_state == 2){
+  c_data = ct_data;                                             //update CC to selection
+  updateCC();                                                   //update CC
+}
+
+if (d_state == 4){
+  
+  if (shift_data == 0) {midi_tap--; display.setSegments(S_minus);}             //shift back
+  if (shift_data == 1) {midi_tap++; display.setSegments(S_plus);}              //shift forward
+   
+  bpmMillis = millis();         
+}
+
+}
+
 void step_edit(){
 //show edit cursor
 //bpmMillis = millis();
@@ -836,4 +875,6 @@ pot_data = analogRead(A0);                                              //get an
               step_v[step_tap] = pot_data;  //step value to array
 if(digitalRead(e_pin) == LOW) {updateMode();}                 //show mode on release
 }
+
+
  
