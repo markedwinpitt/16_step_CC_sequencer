@@ -98,6 +98,10 @@ const uint8_t S_p[] = {
     SEG_A | SEG_B | SEG_E | SEG_F | SEG_G,0x0,0x0,0x0             // P
 };
 
+const uint8_t S_pmin[] = {
+    SEG_A | SEG_B | SEG_E | SEG_F | SEG_G,SEG_G,0x0,0x0             // P-
+};
+
 const uint8_t S_omin[] = {
     SEG_C | SEG_D | SEG_E | SEG_G,            //o
     SEG_G,0x0,0x0                             // -
@@ -109,6 +113,10 @@ const uint8_t S_b[] = {
 
 const uint8_t S_S[] = {
     SEG_A | SEG_D | SEG_C | SEG_F | SEG_G ,0x0,0x0, 0x0           // S
+};
+
+const uint8_t S_Smin[] = {
+    SEG_A | SEG_D | SEG_C | SEG_F | SEG_G , SEG_G ,0x0, 0x0       // S-
 };
 
 const uint8_t S_sync[] = {
@@ -154,7 +162,6 @@ const uint8_t S_no[] = {
     SEG_G
 };
 
-
 const uint8_t S_ch[] = {
     SEG_D | SEG_E | SEG_G,   
     SEG_C | SEG_E | SEG_G | SEG_F    
@@ -169,10 +176,8 @@ const uint8_t S_off[] = {
                                                       // Poff
 };
 
-const uint8_t S_o[] = {
-   
-    SEG_C | SEG_D | SEG_E | SEG_G, 0x0,0x0, 0x0       // o
-                              
+const uint8_t S_o[] = {  
+    SEG_C | SEG_D | SEG_E | SEG_G, 0x0,0x0, 0x0       // o                         
 };
 
 const uint8_t S_soff[] = {
@@ -218,11 +223,11 @@ const uint8_t S_hold[] = {
     SEG_B | SEG_C | SEG_D | SEG_E | SEG_G             // d
 };
 
-const uint8_t S_disp[] = {
+const uint8_t S_dire[] = {
     SEG_B | SEG_C | SEG_D | SEG_E | SEG_G,            // d
-    SEG_E | SEG_F,                                    // I
-    SEG_A | SEG_D | SEG_C | SEG_F | SEG_G,            // S
-    SEG_A | SEG_B | SEG_E | SEG_F | SEG_G             // P
+    SEG_E,                                            // i
+    SEG_E | SEG_G,                                    // r
+    SEG_A | SEG_D | SEG_E | SEG_F | SEG_G             // E
 };
 
 const uint8_t S_bpm[] = {
@@ -274,12 +279,14 @@ void setup() {
 
   EEPROM_ADDRESS = 1;
   
-  pinMode(A7, INPUT_PULLUP);
+  pinMode(A3, INPUT_PULLUP);
+  pinMode(A4, INPUT_PULLUP);
+  pinMode(A5, INPUT_PULLUP);
+  pinMode(A2, INPUT_PULLUP);
   
   pinMode(e_pin, INPUT_PULLUP);
   
   Serial.begin(31250);            //set for midi
-  //Serial.begin(9600);           //set for debug
 
   MIDI.begin(4);                      // Launch MIDI and listen to channel 4
   pinMode(ledPin, OUTPUT);
@@ -327,13 +334,13 @@ display.setBrightness(brightness);                                   //set the d
   Timer1.setPeriod(calculateIntervalMicroSecs(bpm));  
   Timer1.attachInterrupt(sendClockPulse);             //first pulse
   updateMode();                                       //starting mode
+  stop_button();                                      //stop sequencer
 }
 
 void loop() {
 
 if(oldEncPos != encoderPos) 
   {
-  Serial.println(encoderPos);
   oldEncPos = encoderPos;
   }
 
@@ -346,17 +353,17 @@ if (currentMillis - previousMillis >= 30) {
     // save the last time you checked
     previousMillis = currentMillis;
  
-    //b_data = round(analogRead(A1)/170);                  //get analogue 2 data for select MODE (mapped for 6)
-    b_data = map(analogRead(A1), 0, 1060,0, 6);
+    //b_data = round(analogRead(A1)/170);                  //get analogue 2 data for select MODE (mapped for 7)
+    b_data = map(analogRead(A1), 0, 1060,0, 7);
     //m_data = round(analogRead(A2)/64);                   //get analogue 3 data for MIDI channel (mapped for 16)
-    m_data = map(analogRead(A2), 0, 1060,0, 11);
+    m_data = map(analogRead(A7), 0, 1060,0, 11);
     
       if(digitalRead(e_pin) == HIGH) {  step_edit();}                                     //edit step mode
                                 
-      if(analogRead(A3) >= 1000) {play_button();}  else {p_butt=0;}                      //play button
-      if(analogRead(A4) >= 1000) {stop_button();}  else {p_butt=0;}                      //stop and return to 1st step
-      if(analogRead(A5) >= 1000) {hold_button();}  else {p_butt=0;}                      //hold button
-      if(analogRead(A6) >= 1000) {select_button();}  else {p_butt=0;}                      //select button
+      if(digitalRead(A3) == LOW) {play_button();}  else {p_butt=0;}                      //play button
+      if(digitalRead(A4) == LOW) {stop_button();}  else {p_butt=0;}                      //stop and return to 1st step
+      if(digitalRead(A5) == LOW) {hold_button();}  else {p_butt=0;}                      //hold button
+      if(digitalRead(A2) == LOW) {select_button();}  else {p_butt=0;}                      //select button
       
     update_para();                                                      //show step parameter
 }
@@ -552,8 +559,8 @@ if(p_state==0){                 //check play mode
   midi_tap ++;                  //increment midi clock
   pot_data = map(analogRead(A0), 0, 1020,0, 131);         //map to 128 TEST
   if(digitalRead(e_pin) == LOW) {msend = pot_data-4 ;} else {msend = step_v[step_tap]-4;}
+  
   if(msend >= 0) {MIDI.sendControlChange( c_data, msend, m_chan);}   // send midi data
-  //if(msend >= 0) {MIDI.sendControlChange( 7, msend, m_chan);}  //temp
 
   if(midi_tap >= 6) {                                           //after 6 clicks move step forward
 
@@ -561,6 +568,7 @@ if(p_state==0){                 //check play mode
     
     midi_tap = 0;                                               //reset midi click
     if(digitalRead(e_pin) == LOW) {selector(step_tap);}         //only select channel if edit is off
+    //if(msend >= 0) {MIDI.sendControlChange( c_data, msend, m_chan);}   // send midi data
     
     if(step_tap >= 15) {                                        //if at end of sequence (16) reset to start
         step_tap = 0;                                           //reset
@@ -657,7 +665,6 @@ void updateSync() {
 
 void updateOffset() {
    
-    //selector(step_tap);                                     //multiplexor select
     o_data = encoderPos;                                      //update offset value
 
     if (o_data > 64) {o_data = 64; encoderPos = 64;}          //offset ceiling
@@ -732,6 +739,11 @@ void updateMode() {
       encoderPos = brightness;
       d_state = 6;
       break;
+    case 6:
+      display.setSegments(S_dire);                      //set display brightness
+      encoderPos = brightness;
+      d_state = 7;
+      break;
     }
 
   bpmMillis = millis();                                     //last BPM change
@@ -790,8 +802,17 @@ void update_para(){
             pot_data = map(pot_data, 0, 1020,0, 131);         //map to 128
             if(pot_data>3)               
               {
-                if(digitalRead(e_pin) == LOW){ display.setSegments(S_p);}     //show P for parameter in 1st digit
-                display.showNumberDec(pot_data-3,false,3,1);                  //show parameter value 
+
+                if ((pot_data-3-o_data) >= 0){
+                  if(digitalRead(e_pin) == LOW){ display.setSegments(S_p);}     //show P for parameter in 1st digit
+                  display.showNumberDec(pot_data-3-o_data,false,3,1);                  //show parameter value 
+                }
+                else
+                {
+                  if(digitalRead(e_pin) == LOW){ display.setSegments(S_pmin);}     //show P for parameter in 1st digit with minus
+                  display.showNumberDec((pot_data-3-o_data)*-1,false,2,2);                  //show parameter value 
+                }
+              
               }
             else
               if(digitalRead(e_pin) == LOW){ {display.setSegments(S_off);}
@@ -818,7 +839,7 @@ void play_button(){
 }
 
 void stop_button(){
-  if (p_state !=2 ){                                               //check button state
+  if (p_state !=2 ){                                            //check button state
     display.setSegments(S_stop);bpmMillis = millis();           //stop sequence
     p_state=2;
     Serial.write(midi_stop);                                    //send out midi stop signal
@@ -839,17 +860,40 @@ p_butt=1;                                                       //set play butto
 
 void select_button(){
 
-if (d_state == 2){
+if (d_state == 1){                                              //check if in BPM mode
+  updateBpm();                                                  //update BPM to show current value
+}
+
+if (d_state == 2){                                              //check if in CC mode
   c_data = ct_data;                                             //update CC to selection
   updateCC();                                                   //update CC
 }
 
-if (d_state == 4){
-  
-  if (shift_data == 0) {midi_tap--; display.setSegments(S_minus);}             //shift back
-  if (shift_data == 1) {midi_tap++; display.setSegments(S_plus);}              //shift forward
-   
+if (d_state == 3){                                              //check if in sync mode
+    switch (s_data){
+      case 0:                                                   //internal sync
+        display.setSegments(S_sin);    
+        break;
+      case 1:                                                   //external sync
+        display.setSegments(S_out);    
+        break;
+    }
+    bpmMillis = millis();  
+}
+
+if (d_state == 4){                                                        //check if in shift mode
+  if (shift_data == 0) {step_tap--; display.setSegments(S_minus);}        //shift back
+  if (shift_data == 1) {midi_tap++; display.setSegments(S_plus);}         //shift forward 
+  if(midi_tap >= 6) {midi_tap = 0; step_tap ++;}
   bpmMillis = millis();         
+}
+
+if (d_state == 5){                                                        //check if in offset mode
+  updateOffset();                                                         //update offset to show current value  
+}
+
+if (d_state == 6){                                                        //check if in Brightness mode
+  updateBright();                                                         //update Brightness to show current value  
 }
 
 }
@@ -866,13 +910,22 @@ pot_data = analogRead(A0);                                              //get an
         pot_data = map(pot_data, 0, 1020,0, 131);             //map to 128
             if(pot_data > 3)              
               {
-                display.setSegments(S_S);                     //show P for parameter in 1st digit
-                display.showNumberDec(pot_data-3,false,3,1);  //show parameter value for cursor
+                //display.setSegments(S_S);                     //show P for parameter in 1st digit
+                //display.showNumberDec(pot_data-3,false,3,1);  //show parameter value for cursor
+                
+                if ((pot_data-3-o_data) >= 0){
+                  display.setSegments(S_S);                                         //show S for parameter in 1st digit
+                  display.showNumberDec(pot_data-3-o_data,false,3,1);               //show parameter value for cursor
+                }
+                else
+                {
+                  display.setSegments(S_Smin);                                      //show S for parameter in 1st digit with minus
+                  display.showNumberDec((pot_data-3-o_data)*-1,false,2,2);          //show parameter value for cursor
+                }
               }
             else
-              {display.setSegments(S_soff);}                  //show Poff for parameter
-              //selector(step_tap);
-              step_v[step_tap] = pot_data;  //step value to array
+              {display.setSegments(S_soff);}                  //show Soff for cursor
+              step_v[step_tap] = pot_data;                    //step value to array
 if(digitalRead(e_pin) == LOW) {updateMode();}                 //show mode on release
 }
 
